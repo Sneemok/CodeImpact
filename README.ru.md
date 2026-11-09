@@ -15,7 +15,7 @@ codeimpact analyze src/auth.py
 - **Настоящее разрешение имён, а не grep.** Импорты с алиасами, относительные импорты, реэкспорт через `__init__.py`, `from x import *`, вложенные классы, константы модулей.
 - **Понимает классы.** `self.method()`, `cls.method()`, `super()`, наследование (MRO), конструкторы (`User(...)` зависит от `User.__init__`), атрибуты классов и поля dataclass.
 - **Лёгкий вывод типов.** Аннотации параметров (`Optional[Repo]`, `Repo | None`, `"Repo"`), `x = Repo()`, `with Lock() as lock`, `self.repo = Repo()` — поэтому `self.repo.save()` разрешается в `Repo.save`.
-- **Выбор тестов с учётом pytest.** Тестовые функции, классы `Test*`, фикстуры из `conftest.py` вверх по дереву каталогов, `@pytest.fixture(name=...)`, `@pytest.mark.usefixtures(...)`, цели `mock.patch("pkg.mod.func")`. На выходе — готовые node id для pytest.
+- **Выбор тестов с учётом pytest.** Тестовые функции, классы `Test*`, наследники `unittest.TestCase` с любым именем, фикстуры из `conftest.py` вверх по дереву каталогов, `@pytest.fixture(name=...)`, `autouse=True` фикстуры (с учётом переопределений), `@pytest.mark.usefixtures(...)`, цели `mock.patch("pkg.mod.func")`. На выходе — готовые node id для pytest.
 - **Интеграция с git.** `codeimpact diff` сопоставляет дифф с конкретными функциями. Правки только комментариев и пробелов игнорируются. **Удалённые** функции прослеживаются до мест, которые всё ещё их вызывают, а модули, которые упадут с `ImportError` (и всё, что их импортирует), показываются как *broken imports*.
 - **Честная уверенность.** Вызовы на объектах без известного типа (`obj.deliver_mail()`) связываются только если имя метода уникально в проекте, и помечаются `~likely`. `--strict` это отключает.
 - **Форматы вывода:** цветное дерево, JSON, Markdown (для PR и `$GITHUB_STEP_SUMMARY`), Graphviz DOT, Mermaid.
@@ -26,7 +26,7 @@ codeimpact analyze src/auth.py
 
 ```bash
 git clone https://github.com/Sneemok/CodeImpact.git
-cd codeimpact
+cd CodeImpact
 pip install -e ".[dev]"
 ```
 
@@ -41,6 +41,7 @@ codeimpact analyze src/auth.py --since main         # только изменё�
 
 codeimpact diff                                     # незакоммиченные изменения
 codeimpact diff --staged --run                      # и сразу запустить нужные тесты
+codeimpact diff origin/main --merge-base            # только то, что изменила ваша ветка
 codeimpact diff origin/main --format markdown -o impact.md
 
 pytest $(codeimpact analyze src/auth.py --tests-only)
@@ -49,7 +50,7 @@ codeimpact deps src/api.py -f handle_login          # обратное напр�
 codeimpact symbols src/auth.py                      # таблица fan-in / fan-out
 ```
 
-Основные опции: `--depth N`, `--strict`, `--fuzzy N`, `--format text|json|markdown|dot|mermaid`, `-o FILE`, `--tests-only`, `--run`, `--fail-over N`, `--root DIR`, `--exclude GLOB`, `--no-cache`.
+Основные опции: `--depth N`, `--strict`, `--fuzzy N`, `--format text|json|markdown|dot|mermaid`, `-o FILE`, `--tests-only`, `--run`, `--fail-over N`, `--merge-base`, `--root DIR`, `--exclude GLOB`, `--no-cache`.
 
 Коды выхода: `0` — успех, `1` — превышен `--fail-over`, `2` — ошибка аргументов; с `--run` возвращается код pytest.
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `--merge-base` for `diff REF` and `analyze --since REF`: compare with `git merge-base REF HEAD`, so new commits on the base branch no longer show up as changes.
+- `autouse=True` fixtures now select every test in their scope (module, class or `conftest.py` directory), respecting overrides.
+- `unittest.TestCase` subclasses are recognised as tests regardless of their class name.
+- CI and impact workflows in `.github/workflows/`.
+
 ## 0.1.0 — 2026-11-09
 
 First release.

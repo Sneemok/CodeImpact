@@ -6,7 +6,7 @@
 
 Static change-impact analysis for Python. CodeImpact builds a call/reference graph of your project from the AST, walks it backwards from the code you touched, and tells you which functions, classes and modules depend on it — and exactly which pytest tests to run.
 
-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
+[![CI](https://github.com/Sneemok/CodeImpact/actions/workflows/ci.yml/badge.svg)](https://github.com/Sneemok/CodeImpact/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-3776AB?logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/dependencies-zero-success)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
@@ -62,7 +62,7 @@ Every line in the tree answers *why*: `hash_password` → `create_user` → the 
 - **Real resolution, not grep.** Imports with aliases, relative imports, package re-exports through `__init__.py`, `from x import *`, nested classes and module-level constants.
 - **Understands classes.** `self.method()`, `cls.method()`, `super()`, inheritance (MRO), constructors (`User(...)` depends on `User.__init__`), class attributes and dataclass fields.
 - **Light type inference.** Parameter annotations (`Optional[Repo]`, `Repo | None`, `"Repo"`), `x = Repo()`, `with Lock() as lock`, `self.repo = Repo()` and `self.repo: Repo` — so `self.repo.save()` resolves to `Repo.save`.
-- **Pytest-aware test selection.** Test functions, `Test*` classes, fixtures from `conftest.py` up the directory tree, `@pytest.fixture(name=...)`, `@pytest.mark.usefixtures(...)` and `mock.patch("pkg.mod.func")` targets. Output is ready-to-run pytest node ids.
+- **Pytest-aware test selection.** Test functions, `Test*` classes, `unittest.TestCase` subclasses with any name, fixtures from `conftest.py` up the directory tree, `@pytest.fixture(name=...)`, `autouse=True` fixtures (with overrides), `@pytest.mark.usefixtures(...)` and `mock.patch("pkg.mod.func")` targets. Output is ready-to-run pytest node ids.
 - **Git integration.** `codeimpact diff` maps a diff to the exact functions it touches. Comment-only and whitespace-only edits are ignored. **Deleted** functions are traced to the callers that still reference them, and modules that would fail with `ImportError` (plus everything importing them) are reported as *broken imports*.
 - **Honest confidence.** Calls on untyped objects (`obj.deliver_mail()`) are linked only when the method name is unique in the project, and are marked `~likely`. `--strict` turns this off.
 - **Many outputs.** Colored tree, JSON, Markdown (great for PR comments and `$GITHUB_STEP_SUMMARY`), Graphviz DOT and Mermaid.
@@ -79,7 +79,7 @@ or from a local clone:
 
 ```bash
 git clone https://github.com/Sneemok/CodeImpact.git
-cd codeimpact
+cd CodeImpact
 pip install -e ".[dev]"
 ```
 
@@ -104,7 +104,8 @@ codeimpact analyze myapp.auth                       # a dotted module name
 ```bash
 codeimpact diff                    # uncommitted changes (working tree vs index)
 codeimpact diff --staged           # what you are about to commit
-codeimpact diff origin/main        # everything on your branch
+codeimpact diff origin/main        # working tree vs the tip of origin/main
+codeimpact diff origin/main --merge-base   # only what your branch changed
 codeimpact diff --run              # ...and run only the affected tests
 ```
 
@@ -148,6 +149,7 @@ function  auth.login               42-46          3    4
 | `-o FILE` | Write the report to a file |
 | `--tests-only` | Print only pytest node ids |
 | `--run` / `--pytest-args` | Run the selected tests |
+| `--merge-base` | With `diff REF` or `analyze --since REF`: compare with `git merge-base REF HEAD` |
 | `--fail-over N` | Exit with code 1 when more than N symbols are impacted |
 | `--root DIR` | Project root (default: nearest folder with `pyproject.toml`, `setup.py`, `setup.cfg` or `.git`) |
 | `--exclude GLOB` | Skip paths (repeatable) |
@@ -218,8 +220,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install git+https://github.com/Sneemok/CodeImpact.git pytest
-      - run: codeimpact diff origin/${{ github.base_ref }} --format markdown >> "$GITHUB_STEP_SUMMARY"
-      - run: codeimpact diff origin/${{ github.base_ref }} --run
+      - run: codeimpact diff origin/${{ github.base_ref }} --merge-base --format markdown >> "$GITHUB_STEP_SUMMARY"
+      - run: codeimpact diff origin/${{ github.base_ref }} --merge-base --run
 ```
 
 This repository dogfoods it in [`.github/workflows/impact.yml`](.github/workflows/impact.yml).
