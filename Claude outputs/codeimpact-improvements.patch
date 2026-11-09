@@ -1,0 +1,600 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..01dc1ba
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,25 @@
++name: CI
++
++on:
++  push:
++    branches: [main]
++  pull_request:
++
++jobs:
++  test:
++    runs-on: ${{ matrix.os }}
++    strategy:
++      fail-fast: false
++      matrix:
++        os: [ubuntu-latest, windows-latest]
++        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: ${{ matrix.python-version }}
++      - run: python -m pip install -e ".[dev]"
++      - run: python -m pytest
++      - run: codeimpact analyze src/codeimpact/resolver.py --no-cache
++      - run: codeimpact analyze src/auth.py -f hash_password --no-cache
++        working-directory: examples/demo
+diff --git a/.github/workflows/impact.yml b/.github/workflows/impact.yml
+new file mode 100644
+index 0000000..f5a35a8
+--- /dev/null
++++ b/.github/workflows/impact.yml
+@@ -0,0 +1,23 @@
++name: Impact
++
++on:
++  pull_request:
++
++permissions:
++  contents: read
++
++jobs:
++  impact:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.12"
++      - run: python -m pip install -e ".[dev]"
++      - name: Impact report
++        run: codeimpact diff origin/${{ github.base_ref }} --merge-base --no-cache --format markdown >> "$GITHUB_STEP_SUMMARY"
++      - name: Affected tests
++        run: codeimpact diff origin/${{ github.base_ref }} --merge-base --no-cache --run
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..f8fc638
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,13 @@
++__pycache__/
++*.py[cod]
++*.egg-info/
++build/
++dist/
++.venv/
++venv/
++.pytest_cache/
++.codeimpact_cache/
++.coverage
++htmlcov/
++.idea/
++.vscode/
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5ab7cd6..cc3d8bf 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,12 @@
+ # Changelog
+ 
++## Unreleased
++
++- `--merge-base` for `diff REF` and `analyze --since REF`: compare with `git merge-base REF HEAD`, so new commits on the base branch no longer show up as changes.
++- `autouse=True` fixtures now select every test in their scope (module, class or `conftest.py` directory), respecting overrides.
++- `unittest.TestCase` subclasses are recognised as tests regardless of their class name.
++- CI and impact workflows in `.github/workflows/`.
++
+ ## 0.1.0 — 2026-11-09
+ 
+ First release.
+diff --git a/README.md b/README.md
+index 1785f94..cce7b71 100644
+--- a/README.md
++++ b/README.md
+@@ -6,7 +6,7 @@
+ 
+ Static change-impact analysis for Python. CodeImpact builds a call/reference graph of your project from the AST, walks it backwards from the code you touched, and tells you which functions, classes and modules depend on it — and exactly which pytest tests to run.
+ 
+-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
++[![CI](https://github.com/Sneemok/CodeImpact/actions/workflows/ci.yml/badge.svg)](https://github.com/Sneemok/CodeImpact/actions/workflows/ci.yml)
+ ![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-3776AB?logo=python&logoColor=white)
+ ![Dependencies](https://img.shields.io/badge/dependencies-zero-success)
+ [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+@@ -62,7 +62,7 @@ Every line in the tree answers *why*: `hash_password` → `create_user` → the
+ - **Real resolution, not grep.** Imports with aliases, relative imports, package re-exports through `__init__.py`, `from x import *`, nested classes and module-level constants.
+ - **Understands classes.** `self.method()`, `cls.method()`, `super()`, inheritance (MRO), constructors (`User(...)` depends on `User.__init__`), class attributes and dataclass fields.
+ - **Light type inference.** Parameter annotations (`Optional[Repo]`, `Repo | None`, `"Repo"`), `x = Repo()`, `with Lock() as lock`, `self.repo = Repo()` and `self.repo: Repo` — so `self.repo.save()` resolves to `Repo.save`.
+-- **Pytest-aware test selection.** Test functions, `Test*` classes, fixtures from `conftest.py` up the directory tree, `@pytest.fixture(name=...)`, `@pytest.mark.usefixtures(...)` and `mock.patch("pkg.mod.func")` targets. Output is ready-to-run pytest node ids.
++- **Pytest-aware test selection.** Test functions, `Test*` classes, `unittest.TestCase` subclasses with any name, fixtures from `conftest.py` up the directory tree, `@pytest.fixture(name=...)`, `autouse=True` fixtures (with overrides), `@pytest.mark.usefixtures(...)` and `mock.patch("pkg.mod.func")` targets. Output is ready-to-run pytest node ids.
+ - **Git integration.** `codeimpact diff` maps a diff to the exact functions it touches. Comment-only and whitespace-only edits are ignored. **Deleted** functions are traced to the callers that still reference them, and modules that would fail with `ImportError` (plus everything importing them) are reported as *broken imports*.
+ - **Honest confidence.** Calls on untyped objects (`obj.deliver_mail()`) are linked only when the method name is unique in the project, and are marked `~likely`. `--strict` turns this off.
+ - **Many outputs.** Colored tree, JSON, Markdown (great for PR comments and `$GITHUB_STEP_SUMMARY`), Graphviz DOT and Mermaid.
+@@ -79,7 +79,7 @@ or from a local clone:
+ 
+ ```bash
+ git clone https://github.com/Sneemok/CodeImpact.git
+-cd codeimpact
++cd CodeImpact
+ pip install -e ".[dev]"
+ ```
+ 
+@@ -104,7 +104,8 @@ codeimpact analyze myapp.auth                       # a dotted module name
+ ```bash
+ codeimpact diff                    # uncommitted changes (working tree vs index)
+ codeimpact diff --staged           # what you are about to commit
+-codeimpact diff origin/main        # everything on your branch
++codeimpact diff origin/main        # working tree vs the tip of origin/main
++codeimpact diff origin/main --merge-base   # only what your branch changed
+ codeimpact diff --run              # ...and run only the affected tests
+ ```
+ 
+@@ -148,6 +149,7 @@ function  auth.login               42-46          3    4
+ | `-o FILE` | Write the report to a file |
+ | `--tests-only` | Print only pytest node ids |
+ | `--run` / `--pytest-args` | Run the selected tests |
++| `--merge-base` | With `diff REF` or `analyze --since REF`: compare with `git merge-base REF HEAD` |
+ | `--fail-over N` | Exit with code 1 when more than N symbols are impacted |
+ | `--root DIR` | Project root (default: nearest folder with `pyproject.toml`, `setup.py`, `setup.cfg` or `.git`) |
+ | `--exclude GLOB` | Skip paths (repeatable) |
+@@ -218,8 +220,8 @@ jobs:
+         with:
+           python-version: "3.12"
+       - run: pip install git+https://github.com/Sneemok/CodeImpact.git pytest
+-      - run: codeimpact diff origin/${{ github.base_ref }} --format markdown >> "$GITHUB_STEP_SUMMARY"
+-      - run: codeimpact diff origin/${{ github.base_ref }} --run
++      - run: codeimpact diff origin/${{ github.base_ref }} --merge-base --format markdown >> "$GITHUB_STEP_SUMMARY"
++      - run: codeimpact diff origin/${{ github.base_ref }} --merge-base --run
+ ```
+ 
+ This repository dogfoods it in [`.github/workflows/impact.yml`](.github/workflows/impact.yml).
+diff --git a/README.ru.md b/README.ru.md
+index bc8c9be..4aa6635 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -15,7 +15,7 @@ codeimpact analyze src/auth.py
+ - **Настоящее разрешение имён, а не grep.** Импорты с алиасами, относительные импорты, реэкспорт через `__init__.py`, `from x import *`, вложенные классы, константы модулей.
+ - **Понимает классы.** `self.method()`, `cls.method()`, `super()`, наследование (MRO), конструкторы (`User(...)` зависит от `User.__init__`), атрибуты классов и поля dataclass.
+ - **Лёгкий вывод типов.** Аннотации параметров (`Optional[Repo]`, `Repo | None`, `"Repo"`), `x = Repo()`, `with Lock() as lock`, `self.repo = Repo()` — поэтому `self.repo.save()` разрешается в `Repo.save`.
+-- **Выбор тестов с учётом pytest.** Тестовые функции, классы `Test*`, фикстуры из `conftest.py` вверх по дереву каталогов, `@pytest.fixture(name=...)`, `@pytest.mark.usefixtures(...)`, цели `mock.patch("pkg.mod.func")`. На выходе — готовые node id для pytest.
++- **Выбор тестов с учётом pytest.** Тестовые функции, классы `Test*`, наследники `unittest.TestCase` с любым именем, фикстуры из `conftest.py` вверх по дереву каталогов, `@pytest.fixture(name=...)`, `autouse=True` фикстуры (с учётом переопределений), `@pytest.mark.usefixtures(...)`, цели `mock.patch("pkg.mod.func")`. На выходе — готовые node id для pytest.
+ - **Интеграция с git.** `codeimpact diff` сопоставляет дифф с конкретными функциями. Правки только комментариев и пробелов игнорируются. **Удалённые** функции прослеживаются до мест, которые всё ещё их вызывают, а модули, которые упадут с `ImportError` (и всё, что их импортирует), показываются как *broken imports*.
+ - **Честная уверенность.** Вызовы на объектах без известного типа (`obj.deliver_mail()`) связываются только если имя метода уникально в проекте, и помечаются `~likely`. `--strict` это отключает.
+ - **Форматы вывода:** цветное дерево, JSON, Markdown (для PR и `$GITHUB_STEP_SUMMARY`), Graphviz DOT, Mermaid.
+@@ -26,7 +26,7 @@ codeimpact analyze src/auth.py
+ 
+ ```bash
+ git clone https://github.com/Sneemok/CodeImpact.git
+-cd codeimpact
++cd CodeImpact
+ pip install -e ".[dev]"
+ ```
+ 
+@@ -41,6 +41,7 @@ codeimpact analyze src/auth.py --since main         # только изменё
+ 
+ codeimpact diff                                     # незакоммиченные изменения
+ codeimpact diff --staged --run                      # и сразу запустить нужные тесты
++codeimpact diff origin/main --merge-base            # только то, что изменила ваша ветка
+ codeimpact diff origin/main --format markdown -o impact.md
+ 
+ pytest $(codeimpact analyze src/auth.py --tests-only)
+@@ -49,7 +50,7 @@ codeimpact deps src/api.py -f handle_login          # обратное напр
+ codeimpact symbols src/auth.py                      # таблица fan-in / fan-out
+ ```
+ 
+-Основные опции: `--depth N`, `--strict`, `--fuzzy N`, `--format text|json|markdown|dot|mermaid`, `-o FILE`, `--tests-only`, `--run`, `--fail-over N`, `--root DIR`, `--exclude GLOB`, `--no-cache`.
++Основные опции: `--depth N`, `--strict`, `--fuzzy N`, `--format text|json|markdown|dot|mermaid`, `-o FILE`, `--tests-only`, `--run`, `--fail-over N`, `--merge-base`, `--root DIR`, `--exclude GLOB`, `--no-cache`.
+ 
+ Коды выхода: `0` — успех, `1` — превышен `--fail-over`, `2` — ошибка аргументов; с `--run` возвращается код pytest.
+ 
+diff --git a/src/codeimpact/cli.py b/src/codeimpact/cli.py
+index c3153b2..9e26911 100644
+--- a/src/codeimpact/cli.py
++++ b/src/codeimpact/cli.py
+@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
+ from . import __version__
+ from .analysis import DEPS, IMPACT, Report, SelectionError, analyze, changes_from_git, select
+ from .config import ConfigError, find_root, read_config
+-from .gitdiff import GitError
++from .gitdiff import GitError, merge_base
+ from .project import DEFAULT_TEST_PATTERNS, Project, Settings
+ from .report import BOLD, DIM, FORMATS, Style, render
+ 
+@@ -24,6 +24,7 @@ examples:
+   codeimpact analyze src/auth.py --lines 40-58
+   codeimpact analyze src/auth.py --since main
+   codeimpact diff                      uncommitted changes
++  codeimpact diff origin/main --merge-base   only what your branch changed
+   codeimpact diff origin/main --format markdown -o impact.md
+   codeimpact diff --staged --run       run only the affected tests
+   pytest $(codeimpact analyze src/auth.py --tests-only)
+@@ -82,11 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
+     analyze_parser.add_argument("-f", "--function", action="append", default=[], metavar="NAME", help="only this function/class/method, repeatable")
+     analyze_parser.add_argument("-l", "--lines", action="append", default=[], metavar="A-B", help="only symbols touching these lines, repeatable")
+     analyze_parser.add_argument("--since", metavar="REF", help="only symbols changed in the target since a git ref")
++    analyze_parser.add_argument("--merge-base", action="store_true", help="compare with the merge base of --since and HEAD")
+     analyze_parser.set_defaults(handler=_cmd_analyze)
+ 
+     diff_parser = commands.add_parser("diff", parents=[common, testing], help="impact of the current git diff")
+     diff_parser.add_argument("ref", nargs="?", help="compare the working tree with this ref (default: index)")
+     diff_parser.add_argument("--staged", action="store_true", help="use staged changes")
++    diff_parser.add_argument("--merge-base", action="store_true", help="compare with the merge base of REF and HEAD, i.e. only what your branch changed")
+     diff_parser.set_defaults(handler=_cmd_diff)
+ 
+     deps_parser = commands.add_parser("deps", parents=[common], help="what a symbol depends on")
+@@ -163,10 +166,21 @@ def _finish(report: Report, project: Project, args: argparse.Namespace) -> int:
+     return code
+ 
+ 
++def _base(project: Project, ref: Optional[str], use_merge_base: bool, option: str) -> Tuple[Optional[str], str]:
++    if not use_merge_base:
++        return ref, ref or ""
++    if not ref:
++        raise SelectionError(f"--merge-base needs {option}, e.g. origin/main")
++    base = merge_base(project.root, ref)
++    return base, f"{ref} (merge base {base[:10]})"
++
++
+ def _cmd_analyze(args: argparse.Namespace) -> int:
+     project, depth = _load(args)
+     title = " ".join(args.targets)
+     warnings: List[str] = []
++    if args.merge_base and not args.since:
++        raise SelectionError("--merge-base needs --since REF")
+     if args.since:
+         files = set()
+         for spec in args.targets:
+@@ -174,11 +188,12 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
+             if not infos:
+                 raise SelectionError(f"'{spec}' is not part of the project")
+             files.update(info.path for info in infos)
+-        changes = changes_from_git(project, args.since, False, files)
++        ref, label = _base(project, args.since, args.merge_base, "--since REF")
++        changes = changes_from_git(project, ref, False, files)
+         changed = sorted(changes.changed.values(), key=lambda s: (s.path, s.lineno))
+         removed = sorted(changes.removed.values(), key=lambda s: (s.path, s.lineno))
+         added = sorted(changes.added.values(), key=lambda s: (s.path, s.lineno))
+-        title = f"{title} since {args.since}"
++        title = f"{title} since {label}"
+         if args.function or args.lines:
+             warnings.append("--function and --lines are ignored together with --since")
+     else:
+@@ -190,11 +205,14 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
+ 
+ def _cmd_diff(args: argparse.Namespace) -> int:
+     project, depth = _load(args)
+-    changes = changes_from_git(project, args.ref, args.staged)
+-    if args.staged:
++    ref, label = _base(project, args.ref, args.merge_base, "a REF")
++    changes = changes_from_git(project, ref, args.staged)
++    if args.staged and ref:
++        title = f"staged changes vs {label}"
++    elif args.staged:
+         title = "staged changes"
+-    elif args.ref:
+-        title = f"working tree vs {args.ref}"
++    elif ref:
++        title = f"working tree vs {label}"
+     else:
+         title = "uncommitted changes"
+     report = analyze(
+diff --git a/src/codeimpact/gitdiff.py b/src/codeimpact/gitdiff.py
+index 9c5659b..f949cac 100644
+--- a/src/codeimpact/gitdiff.py
++++ b/src/codeimpact/gitdiff.py
+@@ -94,6 +94,10 @@ def toplevel(cwd: Path) -> Path:
+     return Path(str(git(cwd, "rev-parse", "--show-toplevel")).strip()).resolve()
+ 
+ 
++def merge_base(cwd: Path, ref: str) -> str:
++    return str(git(cwd, "merge-base", ref, "HEAD")).strip()
++
++
+ def diff(cwd: Path, ref: Optional[str] = None, staged: bool = False) -> List[FileDiff]:
+     args = ["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U0"]
+     if staged:
+diff --git a/src/codeimpact/graph.py b/src/codeimpact/graph.py
+index 5614d9f..92b73c3 100644
+--- a/src/codeimpact/graph.py
++++ b/src/codeimpact/graph.py
+@@ -5,7 +5,7 @@ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Dict, List, Optional, Tuple
+ 
+-from .models import ATTRIBUTE, CLASS, EXACT, LIKELY, ModuleInfo
++from .models import ATTRIBUTE, CLASS, EXACT, LIKELY, ModuleInfo, Symbol
+ from .resolver import Resolver
+ 
+ CONSTRUCTORS = ("__init__", "__new__", "__post_init__")
+@@ -88,12 +88,29 @@ def _link_fixtures(modules: Dict[str, ModuleInfo], resolver: Resolver, graph: Gr
+             names.extend(info.usefixtures.get(qualname, []))
+             if symbol.parent:
+                 names.extend(info.usefixtures.get(symbol.parent, []))
++            if info.is_test and symbol.name.startswith("test") and qualname not in fixture_functions:
++                names.extend(n for n in _autouse(info, symbol, chain, resolver) if n not in names)
+             for name in names:
+                 target = _find_fixture(name, qualname, info, chain)
+                 if target:
+                     graph.add(qualname, target, EXACT, symbol.lineno)
+ 
+ 
++def _autouse(info: ModuleInfo, symbol: Symbol, chain: List[ModuleInfo], resolver: Resolver) -> List[str]:
++    names: List[str] = []
++    for owner in (info, *chain):
++        for name in owner.autouse:
++            if name in names:
++                continue
++            fixture = resolver.symbols.get(owner.fixtures.get(name, ""))
++            if fixture is None:
++                continue
++            if fixture.parent and fixture.parent != symbol.parent:
++                continue
++            names.append(name)
++    return names
++
++
+ def _conftest_chain(directory: Path, conftests: Dict[Path, ModuleInfo], root: Path) -> List[ModuleInfo]:
+     chain: List[ModuleInfo] = []
+     current = directory
+diff --git a/src/codeimpact/models.py b/src/codeimpact/models.py
+index 8dbf500..a09e3b2 100644
+--- a/src/codeimpact/models.py
++++ b/src/codeimpact/models.py
+@@ -68,6 +68,7 @@ class ModuleInfo:
+     params: Dict[str, List[str]] = field(default_factory=dict)
+     fixtures: Dict[str, str] = field(default_factory=dict)
+     usefixtures: Dict[str, List[str]] = field(default_factory=dict)
++    autouse: List[str] = field(default_factory=list)
+     error: Optional[str] = None
+ 
+     @property
+diff --git a/src/codeimpact/parser.py b/src/codeimpact/parser.py
+index 2b05102..ccbb212 100644
+--- a/src/codeimpact/parser.py
++++ b/src/codeimpact/parser.py
+@@ -315,15 +315,18 @@ class _Builder:
+         found = chain_of(target)
+         if found and found[-1] == "fixture":
+             fixture_name = default_name
++            autouse = False
+             if isinstance(node, ast.Call):
+                 for keyword in node.keywords:
+-                    if (
+-                        keyword.arg == "name"
+-                        and isinstance(keyword.value, ast.Constant)
+-                        and isinstance(keyword.value.value, str)
+-                    ):
++                    if not isinstance(keyword.value, ast.Constant):
++                        continue
++                    if keyword.arg == "name" and isinstance(keyword.value.value, str):
+                         fixture_name = keyword.value.value
++                    elif keyword.arg == "autouse" and keyword.value.value is True:
++                        autouse = True
+             self.info.fixtures[fixture_name] = qualname
++            if autouse and fixture_name not in self.info.autouse:
++                self.info.autouse.append(fixture_name)
+         elif found and found[-1] == "usefixtures" and isinstance(node, ast.Call):
+             names = self.info.usefixtures.setdefault(qualname, [])
+             for argument in node.args:
+diff --git a/src/codeimpact/project.py b/src/codeimpact/project.py
+index 6ce03fc..c8750f1 100644
+--- a/src/codeimpact/project.py
++++ b/src/codeimpact/project.py
+@@ -22,7 +22,7 @@ SKIP_DIRS = frozenset(
+     }
+ )
+ CACHE_DIR = ".codeimpact_cache"
+-CACHE_KEY = f"{__version__}:2"
++CACHE_KEY = f"{__version__}:3"
+ 
+ 
+ @dataclass
+@@ -239,10 +239,13 @@ class Project:
+             pass
+         elif symbol.kind == METHOD and name.startswith("test"):
+             parent = self.resolver.symbols.get(symbol.parent or "")
+-            if parent is None or not parent.name.startswith("Test"):
++            if parent is None or not self._is_test_class(parent):
+                 return None
+-        elif symbol.kind == CLASS and name.startswith("Test"):
++        elif symbol.kind == CLASS and self._is_test_class(symbol):
+             pass
+         else:
+             return None
+         return f"{info.rel}::{symbol.local.replace('.', '::')}"
++
++    def _is_test_class(self, symbol: Symbol) -> bool:
++        return symbol.kind == CLASS and (symbol.name.startswith("Test") or self.resolver.is_testcase(symbol.qualname))
+diff --git a/src/codeimpact/resolver.py b/src/codeimpact/resolver.py
+index 54d0d90..fccca8d 100644
+--- a/src/codeimpact/resolver.py
++++ b/src/codeimpact/resolver.py
+@@ -223,6 +223,16 @@ class Resolver:
+         finally:
+             self._active.discard(cls)
+ 
++    def is_testcase(self, cls: str) -> bool:
++        for klass in self.mro(cls):
++            symbol = self.symbols.get(klass)
++            info = self.modules.get(symbol.module) if symbol else None
++            if info is None:
++                continue
++            if any(chain[-1].endswith("TestCase") for chain in info.bases.get(klass, ())):
++                return True
++        return False
++
+     def fuzzy(self, rest: Sequence[str]) -> List[Target]:
+         if not self.fuzzy_limit or not rest:
+             return []
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 620d7d4..2836c0a 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -44,6 +44,11 @@ def git(cwd: Path, *args: str) -> str:
+     ).stdout
+ 
+ 
++@pytest.fixture
++def run_git() -> Callable[..., str]:
++    return git
++
++
+ @pytest.fixture
+ def repo(demo: Path) -> Path:
+     if shutil.which("git") is None:
+diff --git a/tests/test_analysis.py b/tests/test_analysis.py
+index 02cf75c..5892204 100644
+--- a/tests/test_analysis.py
++++ b/tests/test_analysis.py
+@@ -136,3 +136,105 @@ def test_test_class_collapses_methods(make_project):
+     )
+     report = analyze(project, select(project, ["tests/test_lib.py"]))
+     assert report.tests == ["tests/test_lib.py::TestF"]
++
++
++def test_autouse_fixture_selects_tests_in_its_scope(make_project):
++    project = make_project(
++        {
++            "lib.py": "def setup_db():\n    return 1\n",
++            "tests/conftest.py": """
++                import pytest
++                from lib import setup_db
++
++                @pytest.fixture(autouse=True)
++                def db():
++                    return setup_db()
++            """,
++            "tests/test_a.py": """
++                import pytest
++
++                def test_plain():
++                    assert True
++
++                class TestGroup:
++                    @pytest.fixture(autouse=True)
++                    def local(self):
++                        return 1
++
++                    def test_inside(self):
++                        assert True
++            """,
++            "other/test_b.py": """
++                def test_outside():
++                    assert True
++            """,
++        }
++    )
++    report = analyze(project, select(project, ["lib.py"], ["setup_db"]))
++    assert report.tests == ["tests/test_a.py::TestGroup::test_inside", "tests/test_a.py::test_plain"]
++    report = analyze(project, select(project, ["tests/test_a.py::TestGroup.local"]))
++    assert report.tests == ["tests/test_a.py::TestGroup::test_inside"]
++
++
++def test_autouse_fixture_can_be_overridden(make_project):
++    project = make_project(
++        {
++            "lib.py": "def setup_db():\n    return 1\n",
++            "tests/conftest.py": """
++                import pytest
++                from lib import setup_db
++
++                @pytest.fixture(autouse=True)
++                def db():
++                    return setup_db()
++            """,
++            "tests/test_a.py": """
++                import pytest
++
++                @pytest.fixture
++                def db():
++                    return None
++
++                def test_plain():
++                    assert True
++            """,
++        }
++    )
++    report = analyze(project, select(project, ["lib.py"], ["setup_db"]))
++    assert report.tests == []
++
++
++def test_unittest_testcase_is_collected_without_test_prefix(make_project):
++    project = make_project(
++        {
++            "lib.py": "def helper():\n    return 2\n",
++            "tests/base.py": """
++                import unittest
++
++                class Base(unittest.TestCase):
++                    pass
++            """,
++            "tests/test_lib.py": """
++                from unittest import TestCase
++                from lib import helper
++                from base import Base
++
++                class HelperTests(TestCase):
++                    def test_helper(self):
++                        assert helper() == 2
++
++                class InheritedTests(Base):
++                    def test_again(self):
++                        assert helper() == 2
++
++                class Plain:
++                    def test_ignored(self):
++                        assert helper() == 2
++            """,
++        }
++    )
++    report = analyze(project, select(project, ["lib.py"], ["helper"]))
++    assert report.tests == [
++        "tests/test_lib.py::HelperTests::test_helper",
++        "tests/test_lib.py::InheritedTests::test_again",
++    ]
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 991275b..64570b2 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -95,3 +95,35 @@ def test_diff_command(repo, capsys, monkeypatch):
+     assert code == 0
+     data = json.loads(out)
+     assert [c["symbol"] for c in data["changed"]] == ["models.User.is_admin"]
++
++
++def test_diff_merge_base_ignores_new_commits_on_base(repo, run_git, capsys, monkeypatch):
++    git = run_git
++    monkeypatch.chdir(repo)
++    base = git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip()
++    models = repo / "src" / "models.py"
++    storage = repo / "src" / "storage.py"
++    git(repo, "checkout", "-q", "-b", "feature")
++    models.write_text(models.read_text(encoding="utf-8").replace('"admin" in self.roles', '"root" in self.roles'), encoding="utf-8")
++    git(repo, "commit", "-q", "-am", "feature")
++    git(repo, "checkout", "-q", base)
++    storage.write_text(storage.read_text(encoding="utf-8").replace("len(self._users)", "len(self._users) + 0"), encoding="utf-8")
++    git(repo, "commit", "-q", "-am", "base moved")
++    git(repo, "checkout", "-q", "feature")
++
++    code, out, _ = run(capsys, "diff", base, "--format", "json", "--no-cache")
++    assert code == 0
++    assert {c["symbol"] for c in json.loads(out)["changed"]} == {"models.User.is_admin", "storage.UserStore.count"}
++
++    code, out, _ = run(capsys, "diff", base, "--merge-base", "--format", "json", "--no-cache")
++    assert code == 0
++    data = json.loads(out)
++    assert [c["symbol"] for c in data["changed"]] == ["models.User.is_admin"]
++    assert "merge base" in data["title"]
++
++
++def test_merge_base_requires_ref(repo, capsys, monkeypatch):
++    monkeypatch.chdir(repo)
++    code, _, err = run(capsys, "diff", "--merge-base", "--no-cache")
++    assert code == 2
++    assert "--merge-base" in err
