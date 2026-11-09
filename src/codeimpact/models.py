@@ -68,6 +68,7 @@ class ModuleInfo:
     params: Dict[str, List[str]] = field(default_factory=dict)
     fixtures: Dict[str, str] = field(default_factory=dict)
     usefixtures: Dict[str, List[str]] = field(default_factory=dict)
+    autouse: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
     @property

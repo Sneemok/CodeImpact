@@ -22,7 +22,7 @@ SKIP_DIRS = frozenset(
     }
 )
 CACHE_DIR = ".codeimpact_cache"
-CACHE_KEY = f"{__version__}:2"
+CACHE_KEY = f"{__version__}:3"
 
 
 @dataclass
@@ -239,10 +239,13 @@ class Project:
             pass
         elif symbol.kind == METHOD and name.startswith("test"):
             parent = self.resolver.symbols.get(symbol.parent or "")
-            if parent is None or not parent.name.startswith("Test"):
+            if parent is None or not self._is_test_class(parent):
                 return None
-        elif symbol.kind == CLASS and name.startswith("Test"):
+        elif symbol.kind == CLASS and self._is_test_class(symbol):
             pass
         else:
             return None
         return f"{info.rel}::{symbol.local.replace('.', '::')}"
+
+    def _is_test_class(self, symbol: Symbol) -> bool:
+        return symbol.kind == CLASS and (symbol.name.startswith("Test") or self.resolver.is_testcase(symbol.qualname))

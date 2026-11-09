@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 from . import __version__
 from .analysis import DEPS, IMPACT, Report, SelectionError, analyze, changes_from_git, select
 from .config import ConfigError, find_root, read_config
-from .gitdiff import GitError
+from .gitdiff import GitError, merge_base
 from .project import DEFAULT_TEST_PATTERNS, Project, Settings
 from .report import BOLD, DIM, FORMATS, Style, render
 
@@ -24,6 +24,7 @@ examples:
   codeimpact analyze src/auth.py --lines 40-58
   codeimpact analyze src/auth.py --since main
   codeimpact diff                      uncommitted changes
+  codeimpact diff origin/main --merge-base   only what your branch changed
   codeimpact diff origin/main --format markdown -o impact.md
   codeimpact diff --staged --run       run only the affected tests
   pytest $(codeimpact analyze src/auth.py --tests-only)
@@ -82,11 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument("-f", "--function", action="append", default=[], metavar="NAME", help="only this function/class/method, repeatable")
     analyze_parser.add_argument("-l", "--lines", action="append", default=[], metavar="A-B", help="only symbols touching these lines, repeatable")
     analyze_parser.add_argument("--since", metavar="REF", help="only symbols changed in the target since a git ref")
+    analyze_parser.add_argument("--merge-base", action="store_true", help="compare with the merge base of --since and HEAD")
     analyze_parser.set_defaults(handler=_cmd_analyze)
 
     diff_parser = commands.add_parser("diff", parents=[common, testing], help="impact of the current git diff")
     diff_parser.add_argument("ref", nargs="?", help="compare the working tree with this ref (default: index)")
     diff_parser.add_argument("--staged", action="store_true", help="use staged changes")
+    diff_parser.add_argument("--merge-base", action="store_true", help="compare with the merge base of REF and HEAD, i.e. only what your branch changed")
     diff_parser.set_defaults(handler=_cmd_diff)
 
     deps_parser = commands.add_parser("deps", parents=[common], help="what a symbol depends on")
@@ -163,10 +166,21 @@ def _finish(report: Report, project: Project, args: argparse.Namespace) -> int:
     return code
 
 
+def _base(project: Project, ref: Optional[str], use_merge_base: bool, option: str) -> Tuple[Optional[str], str]:
+    if not use_merge_base:
+        return ref, ref or ""
+    if not ref:
+        raise SelectionError(f"--merge-base needs {option}, e.g. origin/main")
+    base = merge_base(project.root, ref)
+    return base, f"{ref} (merge base {base[:10]})"
+
+
 def _cmd_analyze(args: argparse.Namespace) -> int:
     project, depth = _load(args)
     title = " ".join(args.targets)
     warnings: List[str] = []
+    if args.merge_base and not args.since:
+        raise SelectionError("--merge-base needs --since REF")
     if args.since:
         files = set()
         for spec in args.targets:
@@ -174,11 +188,12 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             if not infos:
                 raise SelectionError(f"'{spec}' is not part of the project")
             files.update(info.path for info in infos)
-        changes = changes_from_git(project, args.since, False, files)
+        ref, label = _base(project, args.since, args.merge_base, "--since REF")
+        changes = changes_from_git(project, ref, False, files)
         changed = sorted(changes.changed.values(), key=lambda s: (s.path, s.lineno))
         removed = sorted(changes.removed.values(), key=lambda s: (s.path, s.lineno))
         added = sorted(changes.added.values(), key=lambda s: (s.path, s.lineno))
-        title = f"{title} since {args.since}"
+        title = f"{title} since {label}"
         if args.function or args.lines:
             warnings.append("--function and --lines are ignored together with --since")
     else:
@@ -190,11 +205,14 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
 
 def _cmd_diff(args: argparse.Namespace) -> int:
     project, depth = _load(args)
-    changes = changes_from_git(project, args.ref, args.staged)
-    if args.staged:
+    ref, label = _base(project, args.ref, args.merge_base, "a REF")
+    changes = changes_from_git(project, ref, args.staged)
+    if args.staged and ref:
+        title = f"staged changes vs {label}"
+    elif args.staged:
         title = "staged changes"
-    elif args.ref:
-        title = f"working tree vs {args.ref}"
+    elif ref:
+        title = f"working tree vs {label}"
     else:
         title = "uncommitted changes"
     report = analyze(

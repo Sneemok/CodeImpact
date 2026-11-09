@@ -95,3 +95,35 @@ def test_diff_command(repo, capsys, monkeypatch):
     assert code == 0
     data = json.loads(out)
     assert [c["symbol"] for c in data["changed"]] == ["models.User.is_admin"]
+
+
+def test_diff_merge_base_ignores_new_commits_on_base(repo, run_git, capsys, monkeypatch):
+    git = run_git
+    monkeypatch.chdir(repo)
+    base = git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    models = repo / "src" / "models.py"
+    storage = repo / "src" / "storage.py"
+    git(repo, "checkout", "-q", "-b", "feature")
+    models.write_text(models.read_text(encoding="utf-8").replace('"admin" in self.roles', '"root" in self.roles'), encoding="utf-8")
+    git(repo, "commit", "-q", "-am", "feature")
+    git(repo, "checkout", "-q", base)
+    storage.write_text(storage.read_text(encoding="utf-8").replace("len(self._users)", "len(self._users) + 0"), encoding="utf-8")
+    git(repo, "commit", "-q", "-am", "base moved")
+    git(repo, "checkout", "-q", "feature")
+
+    code, out, _ = run(capsys, "diff", base, "--format", "json", "--no-cache")
+    assert code == 0
+    assert {c["symbol"] for c in json.loads(out)["changed"]} == {"models.User.is_admin", "storage.UserStore.count"}
+
+    code, out, _ = run(capsys, "diff", base, "--merge-base", "--format", "json", "--no-cache")
+    assert code == 0
+    data = json.loads(out)
+    assert [c["symbol"] for c in data["changed"]] == ["models.User.is_admin"]
+    assert "merge base" in data["title"]
+
+
+def test_merge_base_requires_ref(repo, capsys, monkeypatch):
+    monkeypatch.chdir(repo)
+    code, _, err = run(capsys, "diff", "--merge-base", "--no-cache")
+    assert code == 2
+    assert "--merge-base" in err

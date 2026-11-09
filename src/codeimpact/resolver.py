@@ -223,6 +223,16 @@ class Resolver:
         finally:
             self._active.discard(cls)
 
+    def is_testcase(self, cls: str) -> bool:
+        for klass in self.mro(cls):
+            symbol = self.symbols.get(klass)
+            info = self.modules.get(symbol.module) if symbol else None
+            if info is None:
+                continue
+            if any(chain[-1].endswith("TestCase") for chain in info.bases.get(klass, ())):
+                return True
+        return False
+
     def fuzzy(self, rest: Sequence[str]) -> List[Target]:
         if not self.fuzzy_limit or not rest:
             return []

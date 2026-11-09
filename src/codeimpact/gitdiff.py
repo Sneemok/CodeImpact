@@ -94,6 +94,10 @@ def toplevel(cwd: Path) -> Path:
     return Path(str(git(cwd, "rev-parse", "--show-toplevel")).strip()).resolve()
 
 
+def merge_base(cwd: Path, ref: str) -> str:
+    return str(git(cwd, "merge-base", ref, "HEAD")).strip()
+
+
 def diff(cwd: Path, ref: Optional[str] = None, staged: bool = False) -> List[FileDiff]:
     args = ["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U0"]
     if staged:

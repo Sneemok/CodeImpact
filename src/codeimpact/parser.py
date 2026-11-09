@@ -315,15 +315,18 @@ class _Builder:
         found = chain_of(target)
         if found and found[-1] == "fixture":
             fixture_name = default_name
+            autouse = False
             if isinstance(node, ast.Call):
                 for keyword in node.keywords:
-                    if (
-                        keyword.arg == "name"
-                        and isinstance(keyword.value, ast.Constant)
-                        and isinstance(keyword.value.value, str)
-                    ):
+                    if not isinstance(keyword.value, ast.Constant):
+                        continue
+                    if keyword.arg == "name" and isinstance(keyword.value.value, str):
                         fixture_name = keyword.value.value
+                    elif keyword.arg == "autouse" and keyword.value.value is True:
+                        autouse = True
             self.info.fixtures[fixture_name] = qualname
+            if autouse and fixture_name not in self.info.autouse:
+                self.info.autouse.append(fixture_name)
         elif found and found[-1] == "usefixtures" and isinstance(node, ast.Call):
             names = self.info.usefixtures.setdefault(qualname, [])
             for argument in node.args:

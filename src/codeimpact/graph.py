@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .models import ATTRIBUTE, CLASS, EXACT, LIKELY, ModuleInfo
+from .models import ATTRIBUTE, CLASS, EXACT, LIKELY, ModuleInfo, Symbol
 from .resolver import Resolver
 
 CONSTRUCTORS = ("__init__", "__new__", "__post_init__")
@@ -88,10 +88,27 @@ def _link_fixtures(modules: Dict[str, ModuleInfo], resolver: Resolver, graph: Gr
             names.extend(info.usefixtures.get(qualname, []))
             if symbol.parent:
                 names.extend(info.usefixtures.get(symbol.parent, []))
+            if info.is_test and symbol.name.startswith("test") and qualname not in fixture_functions:
+                names.extend(n for n in _autouse(info, symbol, chain, resolver) if n not in names)
             for name in names:
                 target = _find_fixture(name, qualname, info, chain)
                 if target:
                     graph.add(qualname, target, EXACT, symbol.lineno)
+
+
+def _autouse(info: ModuleInfo, symbol: Symbol, chain: List[ModuleInfo], resolver: Resolver) -> List[str]:
+    names: List[str] = []
+    for owner in (info, *chain):
+        for name in owner.autouse:
+            if name in names:
+                continue
+            fixture = resolver.symbols.get(owner.fixtures.get(name, ""))
+            if fixture is None:
+                continue
+            if fixture.parent and fixture.parent != symbol.parent:
+                continue
+            names.append(name)
+    return names
 
 
 def _conftest_chain(directory: Path, conftests: Dict[Path, ModuleInfo], root: Path) -> List[ModuleInfo]:

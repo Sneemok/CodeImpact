@@ -45,6 +45,11 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @pytest.fixture
+def run_git() -> Callable[..., str]:
+    return git
+
+
+@pytest.fixture
 def repo(demo: Path) -> Path:
     if shutil.which("git") is None:
         pytest.skip("git is not installed")

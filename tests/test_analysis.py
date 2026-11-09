@@ -136,3 +136,105 @@ def test_test_class_collapses_methods(make_project):
     )
     report = analyze(project, select(project, ["tests/test_lib.py"]))
     assert report.tests == ["tests/test_lib.py::TestF"]
+
+
+def test_autouse_fixture_selects_tests_in_its_scope(make_project):
+    project = make_project(
+        {
+            "lib.py": "def setup_db():\n    return 1\n",
+            "tests/conftest.py": """
+                import pytest
+                from lib import setup_db
+
+                @pytest.fixture(autouse=True)
+                def db():
+                    return setup_db()
+            """,
+            "tests/test_a.py": """
+                import pytest
+
+                def test_plain():
+                    assert True
+
+                class TestGroup:
+                    @pytest.fixture(autouse=True)
+                    def local(self):
+                        return 1
+
+                    def test_inside(self):
+                        assert True
+            """,
+            "other/test_b.py": """
+                def test_outside():
+                    assert True
+            """,
+        }
+    )
+    report = analyze(project, select(project, ["lib.py"], ["setup_db"]))
+    assert report.tests == ["tests/test_a.py::TestGroup::test_inside", "tests/test_a.py::test_plain"]
+    report = analyze(project, select(project, ["tests/test_a.py::TestGroup.local"]))
+    assert report.tests == ["tests/test_a.py::TestGroup::test_inside"]
+
+
+def test_autouse_fixture_can_be_overridden(make_project):
+    project = make_project(
+        {
+            "lib.py": "def setup_db():\n    return 1\n",
+            "tests/conftest.py": """
+                import pytest
+                from lib import setup_db
+
+                @pytest.fixture(autouse=True)
+                def db():
+                    return setup_db()
+            """,
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.fixture
+                def db():
+                    return None
+
+                def test_plain():
+                    assert True
+            """,
+        }
+    )
+    report = analyze(project, select(project, ["lib.py"], ["setup_db"]))
+    assert report.tests == []
+
+
+def test_unittest_testcase_is_collected_without_test_prefix(make_project):
+    project = make_project(
+        {
+            "lib.py": "def helper():\n    return 2\n",
+            "tests/base.py": """
+                import unittest
+
+                class Base(unittest.TestCase):
+                    pass
+            """,
+            "tests/test_lib.py": """
+                from unittest import TestCase
+                from lib import helper
+                from base import Base
+
+                class HelperTests(TestCase):
+                    def test_helper(self):
+                        assert helper() == 2
+
+                class InheritedTests(Base):
+                    def test_again(self):
+                        assert helper() == 2
+
+                class Plain:
+                    def test_ignored(self):
+                        assert helper() == 2
+            """,
+        }
+    )
+    report = analyze(project, select(project, ["lib.py"], ["helper"]))
+    assert report.tests == [
+        "tests/test_lib.py::HelperTests::test_helper",
+        "tests/test_lib.py::InheritedTests::test_again",
+    ]
